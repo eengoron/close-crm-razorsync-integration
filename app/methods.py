@@ -56,6 +56,8 @@ def update_lead(lead, addr, cust):
             difference = [i for i in new_contact_phones_and_emails if i not in close_phones_and_emails]
             if difference:
                 try:
+                    if contact.get('date_created'):
+                        del contact['date_created']
                     api.put('contact/' + contact_names_in_close[contact['name'].lower()]['id'], data=contact)
                     logging.info(f"Updated Contact {contact['name']}")
                 except APIError as e:
@@ -164,6 +166,8 @@ def create_or_update_close_opportunity_from_service_item(serv_item, w_o, lead_da
         opp = potential_opp
         if opp['note'].strip() != opp_data['note'].strip():
             try:
+                if opp_data.get('date_created'):
+                    del opp_data['date_created']
                 api.put('opportunity/' + opp['id'], data=opp_data)
                 logging.info(f"Successfully updated opportunity for Service Item {serv_item['Id']}")
             except APIError as e:
@@ -206,9 +210,11 @@ def create_or_update_close_work_order_notes(serv_items, w_o, lead_data):
     else:
         if potential_note['note'].strip() != note_data['note'].strip():
             try:
+                if note_data.get('date_created'):
+                    del note_data['date_created']
                 api.put('activity/note/' + potential_note['id'], data=note_data)
             except APIError as e:
-                logging.error(f"Failed to update note {potential_note['note_id']}")
+                logging.error(f"Failed to update note {potential_note['id']} because {str(e)}")
 
 def find_work_order_statuses_in_close(work_order_statuses):
     opportunity_statuses = api.get(f"organization/{org_id}", params={ '_fields': 'opportunity_statuses'})['opportunity_statuses']
