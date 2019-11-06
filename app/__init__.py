@@ -16,10 +16,9 @@ log.addHandler(h)
 def job1():
     number = search_in_rs()
 
-#scheduler = BackgroundScheduler()
-#scheduler.add_job(job1,"interval", seconds=int(os.environ.get('seconds')))
-#scheduler.start()
+scheduler = BackgroundScheduler()
+scheduler.add_job(job1,"interval", seconds=int(os.environ.get('seconds')))
+scheduler.start()
 app = Flask(__name__)
-job1()
 if __name__ == '__main__':
-    app.run(use_reloader=False, debug=False)
+    app.run(use_reloader=False, debug=True)
