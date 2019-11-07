@@ -16,10 +16,13 @@ api = CloseIO_API(os.environ.get('CLOSE_API_KEY'))
 org_id = api.get('api_key/' + os.environ.get('CLOSE_API_KEY'))['organization_id']
 dev_api = CloseIO_API(os.environ.get('CLOSE_DEV_API_KEY'))
 
+##############################################
+# Close Methods
+##############################################
 
-
-
-## Close
+## Method to get most recent completed sync time from the Master Lead in the Development Sandbox
+## If we cannot get the most recent completed sync time, we default to 5 minutes before the
+## current time
 def get_sync_time_from_close(current_time):
     if os.environ.get('MASTER_LEAD_ID'):
         try:
@@ -28,10 +31,9 @@ def get_sync_time_from_close(current_time):
                 return lead['custom']['last_sync_time']
         except APIError as e:
             logging.error("No Master Lead could be found...")
-    logging.error("No master lead...")
     return (current_time - 300000)
 
-
+## Method to set the sync time on the master lead in Close once a RazorSync sync has been completed at a particular time.
 def set_sync_time_in_close(last_sync_time):
     if os.environ.get('MASTER_LEAD_ID'):
         try:
@@ -39,9 +41,9 @@ def set_sync_time_in_close(last_sync_time):
         except APIError as e:
             logging.error("Could not update sync time on lead because we could not get the master lead...")
 
-
+## Method to update an existing address lead in Close with new information if the Customer in RazorSync has been updated.
+## We check the differences in lead name, contacts, and billing address, and make updates where appropriate.
 def update_lead(lead, addr, cust):
-    print("Trying updates")
     lead_updates = {}
     name = format_address_as_string(addr)
     contact_names_in_close = { k['display_name'].lower() : k for k in lead['contacts'] }
@@ -66,9 +68,9 @@ def update_lead(lead, addr, cust):
             contact['lead_id'] = lead['id']
             try:
                 api.post('contact', data=contact)
-                logging.info(f"Posted new contact {contact['name']}")
+                logging.info(f"Posted new contact {contact['name']} on {contact['lead_id']}")
             except APIError as e:
-                logging.error(f"Failed to post new contact {contact['name']} to lead because {str(e)}...")
+                logging.error(f"Failed to post new contact {contact['name']} to lead because {str(e)}")
     if len(cust['Addresses']) > 1:
         billing_address = [i for i in cust['Addresses'] if i.get('AddressTypeId') and address_types.get(i['AddressTypeId']) == "Billing"]
         if billing_address:
@@ -81,7 +83,6 @@ def update_lead(lead, addr, cust):
             logging.info(f"Successfully Updated {lead['display_name']}")
         except APIError as e:
             logging.error(f"Failed to PUT updates on lead because {str(e)}")
-
 
 ## Method to create a new lead from a new non-billing address in RazorSync
 def post_new_close_lead(post_addr, post_cust):
@@ -112,6 +113,7 @@ def post_new_close_lead(post_addr, post_cust):
             logging.error(f"Failed to post {lead_data['name']} because {str(e)}")
     return None
 
+## Method to find a close lead using the RS Address ID custom field and searching for an exact match
 def find_close_lead_from_rs_address_id(address_id):
     resp = api.get('lead', params={ 'query': f"\"custom.RS Address ID\":\"{address_id}\"", '_fields': 'id,contacts,opportunities,display_name,custom' })
     if resp['data']:
@@ -119,6 +121,9 @@ def find_close_lead_from_rs_address_id(address_id):
     else:
         return None
 
+## Method to find or create a new lead in Close from an RS address and customer record
+## First, we try to find a lead using find_close_lead_from_rs_address_id. If no lead is found,
+## we post one. If a lead is found, we try to update it.
 def find_or_create_close_address_lead_from_customer(addr, cust):
         lead = find_close_lead_from_rs_address_id(addr['Id'])
         if not lead:
@@ -127,16 +132,20 @@ def find_or_create_close_address_lead_from_customer(addr, cust):
             update_lead(lead, addr, cust)
         return lead
 
+## This method takes a service item ID that was deleted in RazorSync, found below, and
+## marks the opportunity on the Close lead that reflects that service item as "Removed From Work Order".
 def update_deleted_service_item_to_deleted(serv_id, opportunities):
     opp = find_potential_close_opp_from_work_order_service_item_id(opportunities, serv_id)
-    if opp:
+    if opp and opp['status_label'] != 'Removed From Work Order':
         try:
             api.put('opportunity/' + opp['id'], data={ 'status': 'Removed From Work Order' })
             logging.info(f"Successfully updated {opp['id']} to status Removed From Work Order")
         except APIError as e:
-            logging.error(f"Failed to update {opp['id']}'s status to removed from work order'")
+            logging.error(f"Failed to update {opp['id']}'s status to removed from work order' because {str(e)}")
     return None
 
+## Given a Close lead's opportunities and a service item ID as input, this method tries to match
+## a Close opoortunity to a service item ID for updating via note parsing for the given ID.
 def find_potential_close_opp_from_work_order_service_item_id(opportunities, serv_item_id):
 
     potential_opps = [i for i in opportunities if f"Work Order Service Item ID: {serv_item_id}" in i['note'] ]
@@ -144,17 +153,23 @@ def find_potential_close_opp_from_work_order_service_item_id(opportunities, serv
         return potential_opps[0]
     return None
 
+## This method finds all service items in Close given a lead and a Work Order ID.
 def get_list_of_service_items_in_close(lead, work_order_id):
     service_item_ids = []
     for opp in lead['opportunities']:
         try:
+            ## Check to see if there's a service item ID in the opp note. This is the identifier for RS opportunities. Also check to make sure the Work Order ID itself
+            ## matches because a lead can have multiple work orders attached.
             if 'Work Order Service Item ID: ' in opp['note'] and opp['note'].split('Work Order Service Item ID: ')[1].split('\n')[0].strip() and f"Work Order ID: {work_order_id}" in opp['note']:
                 service_item_ids.append(opp['note'].split('Work Order Service Item ID: ')[1].split('\n')[0].strip())
         except IndexError as e:
             logging.error(f"Failed to find service item ID on {opp['id']} - {lead['id']}")
     return service_item_ids
 
-
+## This method tries to update a Close opportunity when a work order service item is updated.
+## We try to find a potential opportunity by service item ID, and if we find one we format the opp_data
+## array like the opps are formatted in Close. If no potential opp is found, we post a new opportunity to the lead.
+## If an opp is found, we try to update it if the notes or value don't match.
 def create_or_update_close_opportunity_from_service_item(serv_item, w_o, lead_data):
     potential_opp = find_potential_close_opp_from_work_order_service_item_id(lead_data['opportunities'], serv_item['Id'])
     opp_data = format_opportunity_data(serv_item, w_o)
@@ -162,21 +177,24 @@ def create_or_update_close_opportunity_from_service_item(serv_item, w_o, lead_da
         opp_data['lead_id'] = lead_data['id']
         try:
             opp = api.post('opportunity', data=opp_data)
-            logging.info(f"Successfully created new opportunity for Service Item {serv_item['Id']}")
+            logging.info(f"Successfully created new opportunity for Service Item {serv_item['Id']} - {w_o['Id']} - {opp['id']}")
         except APIError as e:
-            logging.error(f"Failed to create new opportunity for Service Item {serv_item['Id']}")
+            logging.error(f"Failed to create new opportunity for Service Item {serv_item['Id']} - {w_o['Id']} because {str(e)}")
 
     else:
         opp = potential_opp
-        if opp['note'].strip() != opp_data['note'].strip():
+        if opp['note'].strip() != opp_data['note'].strip() or opp.get('value') != opp_data.get('value'):
             try:
                 if opp_data.get('date_created'):
                     del opp_data['date_created']
                 api.put('opportunity/' + opp['id'], data=opp_data)
-                logging.info(f"Successfully updated opportunity for Service Item {serv_item['Id']}")
+                logging.info(f"Successfully updated opportunity for Service Item {serv_item['Id']} - {opp['id']}")
             except APIError as e:
-                logging.error(f"Failed to update opportunity for Service Item {serv_item['Id']}")
+                logging.error(f"Failed to update opportunity for Service Item {serv_item['Id']} - {opp['id']} because {str(e)}")
 
+## Method to find a note in Close via a work_order_id so we can properly update work order notes and
+## not create duplicates. If the note is meant to be a completed note, we look for was completed on.
+## Otherwise, we look for the pattern "Work Order ID: IDHERE" in the note.
 def find_note_for_work_order_by_id(lead_id, work_order_id, was_completed=False):
     try:
         notes = []
@@ -193,18 +211,22 @@ def find_note_for_work_order_by_id(lead_id, work_order_id, was_completed=False):
                         if f"Work Order ID: {work_order_id}" in note['note'] and not f"Work Order ID: {work_order_id} was completed on:" in note['note']:
                             return note
                     except IndexError as e:
-                        logging.error(f"Failed to parse Work Order note on {lead_id} - {work_order_id}: {note['id']}")
+                        logging.error(f"Failed to parse Work Order note on {lead_id} - {work_order_id} - {note['id']}")
             offset += len(resp['data'])
             has_more = resp['has_more']
     except APIError as e:
-        logging.error(f"Failed to get notes for {lead_id}")
+        logging.error(f"Failed to get notes for {lead_id} because {str(e)}")
     return None
 
+## This method creates or updates work order notes on a lead for a synced work order
 def create_or_update_close_work_order_notes(serv_items, w_o, lead_data):
+    ## Create "was completed" note on the lead.
     if w_o['StatusName'] == 'Complete' and not find_note_for_work_order_by_id(lead_id=lead_data['id'], work_order_id=w_o['Id'], was_completed=True):
         note_data = format_note_data(work_order=w_o, was_completed=True)
         note_data['lead_id'] = lead_data['id']
         api.post('activity/note', data=note_data)
+
+    ## For any Work Order update, try to find the work order not that was previously created. If not, create one.
 
     potential_note = find_note_for_work_order_by_id(lead_id=lead_data['id'], work_order_id=w_o['Id'])
     note_data = format_note_data(work_order=w_o, was_completed=False, service_items=serv_items)
@@ -213,7 +235,7 @@ def create_or_update_close_work_order_notes(serv_items, w_o, lead_data):
         try:
             api.post('activity/note', data=note_data)
         except APIError as e:
-            logging.error(f"Failed to post note to {note_data['lead_id']}")
+            logging.error(f"Failed to post note to {note_data['lead_id']} because {str(e)}")
     else:
         if potential_note['note'].strip() != note_data['note'].strip():
             try:
@@ -223,31 +245,35 @@ def create_or_update_close_work_order_notes(serv_items, w_o, lead_data):
             except APIError as e:
                 logging.error(f"Failed to update note {potential_note['id']} because {str(e)}")
 
+## Method to sync RS Work Order statuses to statuses in Close based on a list of RS statuses defined below
 def find_work_order_statuses_in_close(work_order_statuses):
-    opportunity_statuses = api.get(f"organization/{org_id}", params={ '_fields': 'opportunity_statuses'})['opportunity_statuses']
-    status_names_in_close = [i['label'] for i in opportunity_statuses]
-    if 'Removed From Work Order' not in status_names_in_close:
-        try:
-            api.post('status/opportunity', data={ 'label': 'Removed From Work Order', 'type': 'lost' })
-        except APIError as e:
-            logging.error(f'Failed to Create Removed From Work Order Status because {str(e)}')
-
-    for work_order_status in work_order_statuses:
-        if work_order_status['Name'] not in status_names_in_close:
-            status_data = { 'label': work_order_status['Name']}
-            status_data['type'] = 'active'
-            if 'Complete' in status_data['label']:
-                status_data['type'] = 'won'
-            elif 'No ' in status_data['label'] or 'cancelled' in status_data['label'].lower():
-                status_data['type'] = 'lost'
+    try:
+        opportunity_statuses = api.get(f"organization/{org_id}", params={ '_fields': 'opportunity_statuses'})['opportunity_statuses']
+        status_names_in_close = [i['label'] for i in opportunity_statuses]
+        if 'Removed From Work Order' not in status_names_in_close:
             try:
-                api.post('status/opportunity', data=status_data)
+                api.post('status/opportunity', data={ 'label': 'Removed From Work Order', 'type': 'lost' })
             except APIError as e:
-                logging.error(f"Failed to post status to Close {status_data['label']} because {str(e)}")
+                logging.error(f'Failed to Create Removed From Work Order Status because {str(e)}')
 
+        for work_order_status in work_order_statuses:
+            if work_order_status['Name'] not in status_names_in_close:
+                status_data = { 'label': work_order_status['Name']}
+                status_data['type'] = 'active'
+                if 'Complete' in status_data['label']:
+                    status_data['type'] = 'won'
+                elif 'No ' in status_data['label'] or 'cancelled' in status_data['label'].lower():
+                    status_data['type'] = 'lost'
+                try:
+                    api.post('status/opportunity', data=status_data)
+                except APIError as e:
+                    logging.error(f"Failed to post status to Close {status_data['label']} because {str(e)}")
+    except Exception as e:
+        logging.error(f"Failed to sync Work Order Statuses to Close because {str(e)}")
 
-
-## RazorSync
+##############################################
+# RazorSync Methods
+##############################################
 address_types = {}
 work_order_statuses = {}
 service_item_dictionary = {}
@@ -330,6 +356,7 @@ def find_address_id_using_service_request_id(service_request_id):
         return service_request['AddressId']
     return None
 
+## This method processes work order updates where applicable.
 def process_work_order_updates(work_order, recently_found_leads):
     if (work_order['StatusId'] not in work_order_statuses) or (work_order.get('FieldWorkerId') and work_order['FieldWorkerId'] not in rs_users_dictionary):
         get_settings_models()
@@ -355,13 +382,7 @@ def process_work_order_updates(work_order, recently_found_leads):
     for serv_id in removed_service_items:
         update_deleted_service_item_to_deleted(serv_id, lead['opportunities'])
 
-
-
-def json_print(data):
-    print(json.dumps(data, indent=4))
-
-# Start Timezone Capped Search of RS
-## This is a job that runs on AP Scheduler
+# Start Timezone Capped Search of RS. This is a job that runs on AP Scheduler
 def search_in_rs():
     leads_found_this_search = {}
     current_time = int(time.time()*1000)
@@ -374,12 +395,11 @@ def search_in_rs():
                 lead = find_or_create_close_address_lead_from_customer(address, customer)
                 leads_found_this_search[address['Id']] = lead
         logging.info(f"Found, created, or updated leads for {customer_list.index(customer) + 1} of {len(customer_list)}")
-
-
+        
     work_orders  = make_rs_request(method='POST', url_path="WorkOrder/List", data=mod_dates)
     for order in work_orders:
         process_work_order_updates(order, leads_found_this_search)
-        logging.info(f"Proccessed Work Order {work_orders.index(order) + 1} of {len(work_orders)}")
+        logging.info(f"Proccessed Work Order {work_orders.index(order) + 1} of {len(work_orders)}: {order['Id']}")
     leads_found_this_search = {}
     set_sync_time_in_close(current_time)
     logging.info(f"Ran sync between {convert_epoch_to_dt(last_sync_time, '%x %I:%M:%S %p')} - {convert_epoch_to_dt(current_time, '%x %I:%M:%S %p')}")

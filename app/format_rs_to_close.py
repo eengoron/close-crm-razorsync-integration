@@ -1,4 +1,6 @@
 from datetime import datetime
+
+## Coverts an epoch time in milliseconds to a specified datetime format. 
 def convert_epoch_to_dt(epoch_string, fmt):
     try:
         epoch_dt = epoch_string.split('(')[1].split(')')[0].split('+')[0].split('-')[0]
@@ -16,7 +18,8 @@ def format_address_as_string(addr):
         pass
     return ' '.join(display_name.split())
 
-
+## Formats an address into a Close format by adding it to a dictionary with "address_1".
+## we do this because RS doesn't separate city, state, and zip.
 def format_address(addr):
     address_1_string = format_address_as_string(addr)
     if address_1_string:
@@ -44,7 +47,8 @@ def format_new_contacts_array(customer, lead_id=None):
         contacts.append(contact_data)
     return contacts
 
-
+## Formats an opportunity note in Close with RS information from both the service item
+## and the work order.
 def format_opportunity_note(service_item, work_order):
     opportunity_note = ""
     opp_note_dict = {
@@ -71,10 +75,11 @@ def format_opportunity_note(service_item, work_order):
         opportunity_note += f"{key}: {opp_note_dict[key]}\n"
     return opportunity_note
 
+## Format an opportunity cost in cents for Close opps.
 def format_opportunity_cost(cost):
     return int(float(cost) * 100)
 
-
+## Formats opportunity dictionary from RS data into a Close format.
 def format_opportunity_data(service_item, work_order):
     opportunity_data = {
         'note': format_opportunity_note(service_item, work_order),
@@ -86,6 +91,7 @@ def format_opportunity_data(service_item, work_order):
     }
     return opportunity_data
 
+## Formats the note['note'] field for any Close notes based on RS information
 def format_note_note(work_order, service_items):
     note_note = ""
     note_note_dict = {
@@ -109,6 +115,7 @@ def format_note_note(work_order, service_items):
         note_note += "There are no service items for this Work Order ID"
     return note_note
 
+## Formats a note dictionary based on RS data for posting/putting into Close
 def format_note_data(work_order, was_completed=False, service_items=None):
     if was_completed:
         note_data = {
