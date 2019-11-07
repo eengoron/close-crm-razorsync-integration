@@ -138,7 +138,8 @@ def update_deleted_service_item_to_deleted(serv_id, opportunities):
     return None
 
 def find_potential_close_opp_from_work_order_service_item_id(opportunities, serv_item_id):
-    potential_opps = [i for i in opportunities if 'Work Order Service Item ID: ' in i['note'] and i['note'].split('Work Order Service Item ID: ')[1].split('\n')[0].strip() == str(serv_item_id)]
+
+    potential_opps = [i for i in opportunities if f"Work Order Service Item ID: {serv_item_id}" in i['note'] ]
     if potential_opps:
         return potential_opps[0]
     return None
@@ -146,8 +147,11 @@ def find_potential_close_opp_from_work_order_service_item_id(opportunities, serv
 def get_list_of_service_items_in_close(lead, work_order_id):
     service_item_ids = []
     for opp in lead['opportunities']:
-        if 'Work Order Service Item ID: ' in opp['note'] and opp['note'].split('Work Order Service Item ID: ')[1].split('\n')[0].strip() and f"Work Order ID: {work_order_id}" in opp['note']:
-            service_item_ids.append(opp['note'].split('Work Order Service Item ID: ')[1].split('\n')[0].strip())
+        try:
+            if 'Work Order Service Item ID: ' in opp['note'] and opp['note'].split('Work Order Service Item ID: ')[1].split('\n')[0].strip() and f"Work Order ID: {work_order_id}" in opp['note']:
+                service_item_ids.append(opp['note'].split('Work Order Service Item ID: ')[1].split('\n')[0].strip())
+        except IndexError as e:
+            logging.error(f"Failed to find service item ID on {opp['id']} - {lead['id']}")
     return service_item_ids
 
 
@@ -185,8 +189,11 @@ def find_note_for_work_order_by_id(lead_id, work_order_id, was_completed=False):
                     if f"Work Order ID: {work_order_id} was completed on:" in note['note']:
                         return note
                 else:
-                    if note['note'].split('Work Order ID: ')[1].split('\n')[0].strip() == str(work_order_id):
-                        return note
+                    try:
+                        if f"Work Order ID: {work_order_id}" in note['note'] and not f"Work Order ID: {work_order_id} was completed on:" in note['note']:
+                            return note
+                    except IndexError as e:
+                        logging.error(f"Failed to parse Work Order note on {lead_id} - {work_order_id}: {note['id']}")
             offset += len(resp['data'])
             has_more = resp['has_more']
     except APIError as e:
