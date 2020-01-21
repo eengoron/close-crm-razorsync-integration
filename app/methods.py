@@ -298,8 +298,9 @@ def make_rs_request(method, url_path, params={}, data=None):
         try:
             r.json()
             return r.json()
-        except:
-            logging.error(f"Failed post request to {url_path}")
+        except Exception as e:
+            logging.error(f"Failed post request to {url_path} because {str(e)}")
+            logging.error(f"{r.text}")
             return None
 
 
@@ -311,8 +312,9 @@ def make_rs_request(method, url_path, params={}, data=None):
         try:
             r.json()
             return r.json()
-        except:
-            logging.error(f"Failed post request to {url_path}")
+        except Exception as e:
+            logging.error(f"Failed get request to {url_path} because {str(e)}")
+            logging.error(f"{r.text}")
             return None
 
 # This method gets the address types and work order statuses of the RazorSync organization
@@ -389,12 +391,13 @@ def search_in_rs():
     last_sync_time = get_sync_time_from_close(current_time)
     mod_dates = { "FromModifiedDate": f"/Date({last_sync_time})/", "ToModifiedDate": f"/Date({current_time})/" }
     customer_list = make_rs_request(method='POST', url_path="Customer/List", data=mod_dates)
-    for customer in customer_list:
-        for address in customer['Addresses']:
-            if address_types.get(address['AddressTypeId'], "No Type") != "Billing":
-                lead = find_or_create_close_address_lead_from_customer(address, customer)
-                leads_found_this_search[address['Id']] = lead
-        logging.info(f"Found, created, or updated leads for {customer_list.index(customer) + 1} of {len(customer_list)}")
+    if customer_list:
+        for customer in customer_list:
+            for address in customer['Addresses']:
+                if address_types.get(address['AddressTypeId'], "No Type") != "Billing":
+                    lead = find_or_create_close_address_lead_from_customer(address, customer)
+                    leads_found_this_search[address['Id']] = lead
+            logging.info(f"Found, created, or updated leads for {customer_list.index(customer) + 1} of {len(customer_list)}")
         
     work_orders  = make_rs_request(method='POST', url_path="WorkOrder/List", data=mod_dates)
     for order in work_orders:
