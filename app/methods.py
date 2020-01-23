@@ -28,7 +28,7 @@ def get_sync_time_from_close(current_time):
         try:
             lead = dev_api.get('lead/' + os.environ.get('MASTER_LEAD_ID'), params={ '_fields': 'custom' })
             if lead['custom'].get('last_sync_time'):
-                return lead['custom']['last_sync_time']
+                return int(lead['custom']['last_sync_time'])
         except APIError as e:
             logging.error("No Master Lead could be found...")
     return (current_time - 300000)
