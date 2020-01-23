@@ -300,7 +300,7 @@ def make_rs_request(method, url_path, params={}, data=None):
             return r.json()
         except Exception as e:
             logging.error(f"Failed post request to {url_path} because {str(e)}")
-            logging.error(f"{r.text}")
+            logging.error(f"Url: {url}\nHeaders: {razorsync_headers}\nData: {data}")
             return None
 
 
